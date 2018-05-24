@@ -6993,7 +6993,7 @@ Mesh:
   m_ObjectHideFlags: 0
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
-  m_Name: pb_Mesh4676
+  m_Name: pb_Mesh4704
   serializedVersion: 8
   m_SubMeshes:
   - serializedVersion: 2
@@ -7652,7 +7652,7 @@ Mesh:
   m_ObjectHideFlags: 0
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
-  m_Name: pb_Mesh-1045036
+  m_Name: pb_Mesh4840
   serializedVersion: 8
   m_SubMeshes:
   - serializedVersion: 2
@@ -11087,13 +11087,13 @@ Transform:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 1857440789}
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -6.3921947, y: 0, z: 9.444311}
+  m_LocalRotation: {x: -0, y: 1, z: -0, w: -0.0000001490116}
+  m_LocalPosition: {x: 49, y: 0, z: -5.92}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 1774587580}
   m_RootOrder: 1
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 179.99998, z: 0}
 --- !u!1001 &1863823389
 Prefab:
   m_ObjectHideFlags: 0
@@ -11132,6 +11132,16 @@ Prefab:
     - target: {fileID: 4756371267597020, guid: 80526bab373bf44c08aa74e9a5c02653, type: 2}
       propertyPath: m_RootOrder
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 114042068847509642, guid: 80526bab373bf44c08aa74e9a5c02653,
+        type: 2}
+      propertyPath: WallRunMinMoveSpeed
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 114042068847509642, guid: 80526bab373bf44c08aa74e9a5c02653,
+        type: 2}
+      propertyPath: WallRunMaxMoveSpeed
+      value: 5
       objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_ParentPrefab: {fileID: 100100000, guid: 80526bab373bf44c08aa74e9a5c02653, type: 2}

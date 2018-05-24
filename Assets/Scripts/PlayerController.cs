@@ -372,7 +372,13 @@ namespace Player
 
 						EasingFunction.Function func = EasingFunction.GetEasingFunction(MoveSpeedEasing);
 						float wallMoveSpeed = Mathf.Lerp(WallRunMinMoveSpeed, WallRunMaxMoveSpeed, func(0f, 1f, _currentFluidity));
-						targetMovementVelocity = currentVelocity.normalized * _moveInputVector.y * wallMoveSpeed;
+						Vector3 inputRight = Vector3.Cross(_moveInputVector, Motor.CharacterUp);
+						Vector3 reorientedInput = Vector3.Cross(Vector3.up, inputRight).normalized * _moveInputVector.magnitude;
+						targetMovementVelocity = currentVelocity.normalized * reorientedInput.magnitude * wallMoveSpeed;
+						targetMovementVelocity = Quaternion.Euler(Head.transform.localRotation.eulerAngles.x, 0f, 0f) * targetMovementVelocity;
+
+						Debug.Log(targetMovementVelocity);
+						Debug.DrawLine(Head.transform.position, Head.transform.position + targetMovementVelocity * 10f, Color.red, 2f);
 
 						currentVelocity = Vector3.Lerp(currentVelocity, targetMovementVelocity, deltaTime);
 
