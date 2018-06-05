@@ -30,12 +30,19 @@ public class PlayerControllerV2 : BaseCharacterController
     [Tooltip("The head of the player, will rotate vertically")]
     public GameObject Head;
 
-	[Header("Movement Settings")]
-	public float GroundMoveMaxSpeed = 5f;
-	public float AirMoveMaxSpeed = 5f;
+    [Header("Movement Settings")]
+    public float GroundMoveAcceleration = 5f;
+	public float GroundMoveMaxSpeed = 10f;
+	public float AirMoveAcceleration = 5f;
+    public float AirMoveMaxSpeed = 25f;
 	public float BoostCooldown = 2f;
 	public float BoostSpeed = 10f;
     public float MoveSharpness = 10f;
+    public float JumpCooldown = 0.5f;
+    public float JumpHeight = 10f;
+    public float Gravity = 20f;
+    public float AirDrag = 0.1f;
+    public float GroundDrag = 2f;
 
     [Header("Aim Settings")]
     public float LookMinSensitivity = 5f;
@@ -52,6 +59,8 @@ public class PlayerControllerV2 : BaseCharacterController
     //Jumping
 	private bool _jumpReq = false;
 	private float _jumpReqTimer = 0f;
+    private bool _jumpAvailable = true;
+    private float _jumpCooldownTimer = 0f;
 
     //Boosting
 	private bool _boostReq = false;
@@ -60,6 +69,9 @@ public class PlayerControllerV2 : BaseCharacterController
 	private bool _boostPerformed = false;
 	private bool _boostAvailable = true;
 	private Vector3 _boostDirection = Vector3.zero;
+
+    //Other
+    private CharacterGroundingReport _lastGroundingReport;
 
 	public void SetPlayerInputs (PlayerInputs inputs) {
         _moveInput = new Vector3(inputs.moveHorizontal, 0f, inputs.moveVertical);
@@ -92,33 +104,21 @@ public class PlayerControllerV2 : BaseCharacterController
 			}
 		}
 
-		//Update player state
-		switch (CurrentState) {
-			case PlayerState.Ground:
-                {
-					if (!Motor.GroundingStatus.FoundAnyGround) {
-						TransitionToState(PlayerState.Air);
-					}
-                    break;
-                }
-            case PlayerState.Air:
-                {
-					if (Motor.GroundingStatus.FoundAnyGround) {
-						TransitionToState(PlayerState.Ground);
-					}
-                    break;
-                }
-            case PlayerState.Wall:
-                {
+        if (_jumpReqTimer <= InputDelay) {
+            _jumpReqTimer += deltaTime;
+            if (_jumpReqTimer > InputDelay) {
+                _jumpReq = false;
+            }
+        }
 
-                    break;
-                }
-            case PlayerState.Boost:
-                {
-
-                    break;
-                }
-		}
+        if (_jumpCooldownTimer <= JumpCooldown) {
+            _jumpCooldownTimer += deltaTime;
+            if (_jumpCooldownTimer > JumpCooldown) {
+                _jumpAvailable = true;
+            } else {
+                _jumpAvailable = false;
+            }
+        }
 
         //Boosting can happen during any state
 		if (_boostReq) {
@@ -160,6 +160,14 @@ public class PlayerControllerV2 : BaseCharacterController
 
 	public override void PostGroundingUpdate(float deltaTime)
 	{
+        if (_lastGroundingReport.FoundAnyGround && !Motor.GroundingStatus.FoundAnyGround) {
+            Debug.Log("Left Ground");
+        }
+        if (!_lastGroundingReport.FoundAnyGround && Motor.GroundingStatus.FoundAnyGround) {
+            Debug.Log("Landed on Ground");
+        }
+
+        _lastGroundingReport = Motor.GroundingStatus;
 	}
 
 	public override void ProcessHitStabilityReport(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, Vector3 atCharacterPosition, Quaternion atCharacterRotation, ref HitStabilityReport hitStabilityReport)
@@ -194,6 +202,37 @@ public class PlayerControllerV2 : BaseCharacterController
 
 	public override void UpdateVelocity(ref Vector3 currentVelocity, float deltaTime)
 	{
+        UpdatePlayerState();
+
+        //Jumping happens any time
+        if (_jumpReq)
+        {
+            //Requested a jump
+            if (Motor.GroundingStatus.FoundAnyGround)
+            {
+                //Currently on ground
+                if (_jumpAvailable)
+                {
+                    //Perform a jump
+                    if (Motor.GroundingStatus.IsStableOnGround)
+                    {
+                        //Vertical jump
+                        currentVelocity += Vector3.up * Mathf.Sqrt(2f * JumpHeight * Gravity);
+                    }
+                    else
+                    {
+                        //Sloped jump
+                        currentVelocity += Motor.GroundingStatus.GroundNormal * Mathf.Sqrt(2f * JumpHeight * Gravity);
+                    }
+
+                    _jumpReq = false;
+                    _jumpCooldownTimer = 0f;
+                    TransitionToState(PlayerState.Air);
+                    Motor.ForceUnground();
+                }
+            }
+        }
+
 		switch (CurrentState) {
 			case PlayerState.Ground:
 				{
@@ -216,9 +255,41 @@ public class PlayerControllerV2 : BaseCharacterController
 					break;
 				}
 		}
-
-        //Jumping happens any time
 	}
+
+    private void UpdatePlayerState() 
+    {
+        //Update player state
+        switch (CurrentState)
+        {
+            case PlayerState.Ground:
+                {
+                    if (!Motor.GroundingStatus.FoundAnyGround)
+                    {
+                        TransitionToState(PlayerState.Air);
+                    }
+                    break;
+                }
+            case PlayerState.Air:
+                {
+                    if (Motor.GroundingStatus.FoundAnyGround)
+                    {
+                        TransitionToState(PlayerState.Ground);
+                    }
+                    break;
+                }
+            case PlayerState.Wall:
+                {
+
+                    break;
+                }
+            case PlayerState.Boost:
+                {
+
+                    break;
+                }
+        }
+    }
 
 	private void GroundMove(ref Vector3 currentVelocity, float deltaTime)
 	{
@@ -227,17 +298,25 @@ public class PlayerControllerV2 : BaseCharacterController
 		//Reorient velocity to surface normal
 		Vector3 norm = Motor.GroundingStatus.GroundNormal;
         currentVelocity = Motor.GetDirectionTangentToSurface(currentVelocity, norm) * currentVelocity.magnitude;
-		targetVelocity = _moveInput * GroundMoveMaxSpeed;
+		targetVelocity = _moveInput * GroundMoveAcceleration;
 
         //Rotate targetVelocity to be relative to character's orientation
         targetVelocity = transform.TransformDirection(targetVelocity);
-
-        currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, deltaTime * MoveSharpness);
+        targetVelocity += currentVelocity;
+        targetVelocity = targetVelocity.normalized * Mathf.Clamp(targetVelocity.magnitude, 0f, GroundMoveMaxSpeed);
+        currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, 1 - Mathf.Exp(-MoveSharpness * deltaTime));
+        currentVelocity *= (1f / (1f + (GroundDrag * deltaTime)));
 	}
 
 	private void AirMove(ref Vector3 currentVelocity, float deltaTime) 
 	{
-
+        Vector3 targetVelocity = _moveInput * AirMoveAcceleration;
+        targetVelocity = transform.TransformDirection(targetVelocity);
+        targetVelocity += currentVelocity;
+        targetVelocity = targetVelocity.normalized * Mathf.Clamp(targetVelocity.magnitude, 0f, AirMoveMaxSpeed);
+        currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, 1 - Mathf.Exp(-MoveSharpness * deltaTime));
+        currentVelocity += Vector3.down * Gravity * deltaTime;
+        currentVelocity *= (1f / (1f + (AirDrag * deltaTime)));
 	}
 
     private void NormalLook(ref Quaternion currentRotation, float deltaTime)
@@ -263,10 +342,11 @@ public class PlayerControllerV2 : BaseCharacterController
         if (!DebugLog) return;
 
         GUILayout.Label(string.Format("Player State: {0}", CurrentState.ToString()));
-        Debug.DrawLine(transform.position, transform.position + Motor.Velocity, Color.red);
-        Debug.DrawLine(transform.position, transform.position + Motor.CharacterForward, Color.green);
+        Debug.DrawLine(transform.position, transform.position + Motor.Velocity, Color.red, 10f);
+        Debug.DrawLine(transform.position, transform.position + Motor.CharacterForward, Color.green, 10f);
     }
 
+    //Only used for camera movement for smoothing purposes
     public void LateUpdate()
     {
         float inputVert = _lookInput.x;
