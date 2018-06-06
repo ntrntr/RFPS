@@ -3,530 +3,535 @@ using System.Collections.Generic;
 using UnityEngine;
 using KinematicCharacterController;
 
-namespace Player
+public struct PlayerInputs {
+	public float moveHorizontal;
+	public float moveVertical;
+    public float lookHorizontal;
+    public float lookVertical;
+	public bool jump;
+	public bool boost;
+    public bool run;
+}
+
+public enum PlayerState {
+	Ground,
+    Air,
+    Wall,
+    Boost
+}
+
+public class PlayerController : BaseCharacterController
 {
-	public enum PlayerState
-	{
-		Default,
-		OnWall,
-		Slide,
-		Clamber,
+    public bool DebugLog = false;
+
+	[Header("General Settings")]
+	public PlayerState CurrentState = PlayerState.Ground;
+	public List<Collider> IgnoredColliders = new List<Collider>();
+	public float InputDelay = 0.1f;
+    [Tooltip("The head of the player, will rotate vertically")]
+    public GameObject Head;
+
+    [Header("Camera Settings")]
+    public Camera PlayerCamera;
+    public float BaseFOV;
+    public float MinFOVAdd;
+    public float MaxFOVAdd;
+
+    [Header("Movement Settings")]
+    public float GroundMoveSpeed = 5f;
+	public float GroundMoveMaxSpeed = 10f;
+    public float GroundRunSpeed = 10f;
+	public float AirMoveSpeed = 5f;
+    public float AirMoveMaxSpeed = 25f;
+    public float AirMoveMaxEffectiveSpeed = 7f;
+	public float BoostCooldown = 2f;
+	public float BoostSpeed = 10f;
+    public float MoveSharpness = 10f;
+    public float JumpCooldown = 0.5f;
+    public float JumpHeight = 10f;
+    public float Gravity = 20f;
+    public float AirDrag = 0.1f;
+    public float GroundDrag = 2f;
+    public float InternalDrag = 2f;
+    public float LandingReduction = 0.5f;
+    public float RunStartup = 5f;
+    public float RunSlowdown = 10f;
+
+    [Header("Aim Settings")]
+    public float LookMinSensitivity = 5f;
+    public float LookMaxSensitivity = 20f;
+    public float LookSharpness = 10f;
+    public float MinVerticalAngle = -85f;
+    public float MaxVerticalAngle = 85f;
+
+    //Input
+	private Vector3 _moveInput = Vector3.zero;
+	private Vector3 _lookInput = Vector3.zero;
+
+    //Moving
+    private float _targetMoveSpeed = 5f;
+    private bool _runReq = false;
+    private float _runReqTimer = 0f;
+    private bool _runActive = false;
+    private float _currentMoveSpeed = 5f;
+
+    //Jumping
+	private bool _jumpReq = false;
+	private float _jumpReqTimer = 0f;
+    private bool _jumpAvailable = true;
+    private float _jumpCooldownTimer = 0f;
+
+    //Boosting
+	private bool _boostReq = false;
+	private float _boostReqTimer = 0f;
+	private float _boostCooldownTimer = 0f;
+	private bool _boostPerformed = false;
+	private bool _boostAvailable = true;
+	private Vector3 _boostDirection = Vector3.zero;
+
+    //Other
+    private CharacterGroundingReport _lastGroundingReport;
+    private Vector3 _lastVelocity;
+    private Vector3 _internalVelocity = Vector3.zero;
+
+    public void Start()
+    {
+        Debug.Assert(Head != null);
+        Debug.Assert(PlayerCamera != null);
+    }
+
+    public void SetPlayerInputs (PlayerInputs inputs) {
+        _moveInput = new Vector3(inputs.moveHorizontal, 0f, inputs.moveVertical);
+        _lookInput = new Vector3(inputs.lookVertical, inputs.lookHorizontal, 0f);
+
+        if (inputs.jump)
+        {
+            _jumpReq = inputs.jump;
+            _jumpReqTimer = 0f;
+        }
+
+        if (inputs.boost)
+        {
+            _boostReq = inputs.boost;
+            _boostReqTimer = 0f;
+        }
+
+        if (inputs.run)
+        {
+            _runReq = inputs.run;
+            _runReqTimer = 0f;
+        }
+
+        if (_moveInput.sqrMagnitude <= 0f && _runActive)
+            StopRunning();
 	}
 
-	public struct PlayerInputs
-	{
-		public float forwardMove;
-		public float rightMove;
-		public float horizontalLook;
-		public float verticalLook;
-		public bool jump;
-		public bool boost;
-		public bool slide;
+	public void TransitionToState(PlayerState next) {
+		CurrentState = next;
 	}
 
-	public class PlayerController : BaseCharacterController
+	public override void AfterCharacterUpdate(float deltaTime)
 	{
-		public PlayerState CurrentState;
-		public bool DebugStats;
+	}
 
-		[Header("GameObejct References")]
-		public GameObject Head;
-
-		[Header("Movement Settings")]
-		public float GroundMaxMoveSpeed = 5f;
-		public float GroundMinMoveSpeed = 3f;
-		public float AirMaxMoveSpeed = 3f;
-		public float AirMinAccelerationSpeed = 5f;
-		public float AirMaxAccelerationSpeed = 5f;
-		public float FluiditySlowDownTime = 3f;
-		public float FluiditySpeedUpTime = 1f;
-		public float StableMovementSharpness = 15f;
-		public float MinWallRunSpeed = 2f;
-		public float MaxWallDisconnectTime = 1f;
-		public Vector3 Gravity = Vector3.down * 30f;
-		public float Drag = 0.1f;
-		public float JumpSpeed = 5f;
-		public float WallJumpSpeed = 10f;
-		public float WallJumpExpiryTime = 0.5f;
-		public float JumpExpiryTime = 0.5f;
-		public float JumpCooldown = 0.5f;
-		public float HorizontalLookSpeed = 5f;
-		public float VerticalLookSpeed = 10f;
-		public float LookSharpness = 15f;
-		public float VerticalMinAngle = -80f;
-		public float VerticalMaxAngle = 80f;
-		public float FOVMin = 0f;
-		public float FOVMax = 20f;
-		public float WallRunMinMoveSpeed;
-		public float WallRunMaxMoveSpeed;
-
-		[Header("Easing Functions")]
-		public EasingFunction.Ease FOVEasing;
-		public EasingFunction.Ease MoveSpeedEasing;
-		public EasingFunction.Ease AirSpeedEasing;
-
-		[Header("Boost Settings")]
-		public float BoostCooldown;
-		public float BoostSpeed;
-		public bool BoostAdditive;
-		public bool BoostCancelVelocity;
-
-		private Vector3 _lookInputVector;
-		private Vector3 _moveInputVector;
-		private bool _jumpReq;
-		private float _jumpReqTimer;
-		private float _jumpCooldownTimer;
-		private bool _canWallJump;
-		private float _canWallJumpTimer;
-		private Vector3 _wallNormal;
-		private float _wallContactTimer;
-		private bool _boostReq;
-		private float _boostTimer;
-		private Vector3 _internalVelocityAdd;
-		private float _currentFluidity; //Value between 0 and 1 representing fluidity
-		private float _fluiditySpeedUpFreq;
-		private float _fluiditySlowDownFreq;
-		private Camera _camera;
-		private float _baseFOV;
-
-		public void StateTransition(PlayerState state)
-		{
-			Debug.Log("Transitioning to " + state.ToString());
-			PlayerState prvState = CurrentState;
-			OnStateExit(prvState, state);
-			CurrentState = state;
-			OnStateEnter(state, prvState);
+	public override void BeforeCharacterUpdate(float deltaTime)
+	{
+        //Updating various timers
+		if (_boostReq) {
+			_boostReqTimer += deltaTime;
+		} else {
+			_boostReqTimer = 0f;
 		}
-
-		public void OnStateEnter(PlayerState state, PlayerState fromState)
-		{
-			switch (state)
-			{
-				case PlayerState.Default:
-					{
-						break;
-					}
+		if (_boostPerformed) {
+			_boostCooldownTimer += deltaTime;
+			if (_boostCooldownTimer >= BoostCooldown) {
+				_boostAvailable = true;
+				_boostPerformed = false;
 			}
 		}
 
-		public void OnStateExit(PlayerState state, PlayerState toState)
-		{
-			switch (state)
-			{
-				case PlayerState.Default:
-					{
-						break;
-					}
-			}
-		}
-
-		public void SetInputs(PlayerInputs inputs)
-		{
-			// Movement
-			Vector3 movementInput = Vector3.ClampMagnitude(new Vector3(inputs.rightMove, 0f, inputs.forwardMove), 1f);
-
-			// Aiming
-			Vector3 lookInput = new Vector3(0f, inputs.horizontalLook, 0f);
-
-			//Vertical aim goes straight to camera
-			Vector3 headEuler = Head.transform.localRotation.eulerAngles;
-			headEuler += new Vector3(inputs.verticalLook, 0f, 0f) * VerticalLookSpeed;
-			headEuler.x = ClampAngle(headEuler.x, VerticalMinAngle, VerticalMaxAngle);
-			Head.transform.localRotation = Quaternion.Euler(headEuler);
-
-			// Boost can happen in any state
-			if (inputs.boost)
-			{
-				_boostReq = true;
-			}
-
-            //Jumping
-			if (inputs.jump)
-            {
-                _jumpReq = true;
-                _jumpReqTimer = 0f;
+        if (_jumpReqTimer <= InputDelay) {
+            _jumpReqTimer += deltaTime;
+            if (_jumpReqTimer > InputDelay) {
+                _jumpReq = false;
             }
+        }
 
-			switch (CurrentState)
-			{
-				case PlayerState.Default:
-					{
-						
-						break;
-					}
-			}
+        if (_jumpCooldownTimer <= JumpCooldown) {
+            _jumpCooldownTimer += deltaTime;
+            if (_jumpCooldownTimer > JumpCooldown) {
+                _jumpAvailable = true;
+            } else {
+                _jumpAvailable = false;
+            }
+        }
 
-			_moveInputVector = movementInput;
-			_moveInputVector = Quaternion.Euler(0f, transform.rotation.eulerAngles.y, 0f) * _moveInputVector;
-			_lookInputVector = lookInput;
-		}
+        if (_runReqTimer <= InputDelay) {
+            _runReqTimer += deltaTime;
+            if (_runReqTimer > InputDelay) {
+                _runReq = false;
+            }
+        }
 
-		private static float ClampAngle(float angle, float min, float max)
-		{
-			if (angle > 180f)
-				angle -= 360f;
-			return Mathf.Clamp(angle, min, max);
-		}
-
-		public void Start()
-		{
-			//Start in default state
-			StateTransition(PlayerState.Default);
-
-			Debug.Assert(Head != null, "Couldn't find head");
-			_camera = GameObject.Find("Main Camera").GetComponent<Camera>();
-			Debug.Assert(_camera != null);
-			_baseFOV = _camera.fieldOfView;
-
-			//Some sanity checks
-			Debug.Assert(FluiditySpeedUpTime > 0f);
-			Debug.Assert(FluiditySlowDownTime > 0f);
-
-			_fluiditySpeedUpFreq = 1f / FluiditySpeedUpTime;
-			_fluiditySlowDownFreq = 1f / FluiditySlowDownTime;
-		}
-
-		public void Update()
-		{
-			_camera.fieldOfView = _baseFOV + Mathf.Lerp(FOVMin, FOVMax, EasingFunction.GetEasingFunction(FOVEasing).Invoke(0f, 1f, _currentFluidity));
-		}
-
-		public override void UpdateRotation(ref Quaternion currentRotation, float deltaTime)
-		{
-			Quaternion targetRotation = Quaternion.identity;
-			switch (CurrentState)
-			{
-				case PlayerState.Default:
-					{
-						Vector3 euler = currentRotation.eulerAngles;
-						euler += _lookInputVector * HorizontalLookSpeed;
-						targetRotation = Quaternion.Euler(euler);
-						break;
-					}
-				case PlayerState.Clamber:
-					{
-
-						break;
-					}
-				case PlayerState.OnWall:
-					{
-						Vector3 euler = currentRotation.eulerAngles;
-						euler += _lookInputVector * HorizontalLookSpeed;
-						targetRotation = Quaternion.Euler(euler);
-						break;
-					}
-				case PlayerState.Slide:
-					{
-
-						break;
-					}
-			}
-
-			currentRotation = Quaternion.Lerp(currentRotation, targetRotation, 1 - Mathf.Exp(-LookSharpness * deltaTime));
-		}
-
-		public override void UpdateVelocity(ref Vector3 currentVelocity, float deltaTime)
-		{
-			UpdateFluidity(deltaTime);
-
-			// Boost can be performed in any state
-			if (_boostReq)
-			{
-				if (_boostTimer >= 0f)
-				{
-					//Boost is available
-					if (_moveInputVector.sqrMagnitude > 0.01f)
-					{
-						// Move dir
-						currentVelocity += _moveInputVector.normalized * BoostSpeed - Vector3.Project(currentVelocity, Motor.CharacterUp);
-					}
-					else
-					{
-						// Look dir
-						currentVelocity += Motor.CharacterForward * BoostSpeed - Vector3.Project(currentVelocity, Motor.CharacterUp);
-					}
-					_boostTimer = -BoostCooldown;
+        //Boosting can happen during any state
+		if (_boostReq) {
+			if (_boostReqTimer <= InputDelay) {
+				if (_boostAvailable) {
+					//Perform boost
+					_boostDirection = _moveInput;
+					if (_moveInput.magnitude <= 0.1f)
+						_boostDirection = Motor.CharacterForward;
+					TransitionToState(PlayerState.Boost);
+					_boostPerformed = true;
+					_boostReq = false;
+				} else {
+					//Cooling down
+                    //TODO Give audio/visual feedback for this
 				}
-				else
-				{
-					//Boost is cooling down
-					//TODO: feedback for boost cooldown
-				}
+			} else {
 				_boostReq = false;
 			}
-
-			switch (CurrentState)
-			{
-				case PlayerState.Default:
-					{
-						Vector3 targetMovementVelocity = Vector3.zero;
-
-						//Handle movement
-						if (Motor.GroundingStatus.IsStableOnGround)
-						{
-							//Grounded movement
-							Vector3 groundNorm = Motor.GroundingStatus.GroundNormal;
-							if (currentVelocity.sqrMagnitude > 0f && Motor.GroundingStatus.SnappingPrevented)
-							{
-								Vector3 groundPointToCharacter = Motor.TransientPosition - Motor.GroundingStatus.GroundPoint;
-								if (Vector3.Dot(currentVelocity, groundPointToCharacter) >= 0f)
-								{
-									groundNorm = Motor.GroundingStatus.OuterGroundNormal;
-								}
-								else
-								{
-									groundNorm = Motor.GroundingStatus.InnerGroundNormal;
-								}
-							}
-
-							//Reorient to ground normal for sloped movement
-							currentVelocity = Motor.GetDirectionTangentToSurface(currentVelocity, groundNorm) * currentVelocity.magnitude;
-
-							EasingFunction.Function func = EasingFunction.GetEasingFunction(MoveSpeedEasing);
-							float groundMoveSpeed = Mathf.Lerp(GroundMinMoveSpeed, GroundMaxMoveSpeed, func(0f, 1f, _currentFluidity));
-							Vector3 inputRight = Vector3.Cross(_moveInputVector, Motor.CharacterUp);
-							Vector3 reorientedInput = Vector3.Cross(groundNorm, inputRight).normalized * _moveInputVector.magnitude;
-							targetMovementVelocity = reorientedInput * groundMoveSpeed;
-
-							currentVelocity = Vector3.Lerp(currentVelocity, targetMovementVelocity, 1 - Mathf.Exp(-StableMovementSharpness * deltaTime));
-						}
-						else
-						{
-							//Air movement
-							EasingFunction.Function func = EasingFunction.GetEasingFunction(AirSpeedEasing);
-							float airMoveSpeed = Mathf.Lerp(AirMinAccelerationSpeed, AirMaxAccelerationSpeed, func(0f, 1f, _currentFluidity));
-							targetMovementVelocity = _moveInputVector * AirMaxMoveSpeed;
-
-							if (Motor.GroundingStatus.FoundAnyGround)
-							{
-								Vector3 perpenticularObstructionNormal = Vector3.Cross(Vector3.Cross(Motor.CharacterUp, Motor.GroundingStatus.GroundNormal), Motor.CharacterUp).normalized;
-								targetMovementVelocity = Vector3.ProjectOnPlane(targetMovementVelocity, perpenticularObstructionNormal);
-							}
-
-							Vector3 velocityDiff = Vector3.ProjectOnPlane(targetMovementVelocity - currentVelocity, Gravity);
-							currentVelocity += velocityDiff * airMoveSpeed * deltaTime;
-							currentVelocity += Gravity * deltaTime;
-							currentVelocity *= (1f / (1f + (Drag * deltaTime)));
-						}
-
-						//Handle jumping
-						if (_jumpReq && _jumpCooldownTimer >= JumpCooldown)
-						{
-							if (_jumpReqTimer >= JumpExpiryTime)
-								_jumpReq = false;
-							else
-							{
-								if (Motor.GroundingStatus.IsStableOnGround)
-								{ //Perform a normal jump
-									Vector3 jumpDirection = Vector3.up;
-									Motor.ForceUnground();
-									currentVelocity += (jumpDirection * JumpSpeed) - Vector3.Project(currentVelocity, Motor.CharacterUp);
-									_jumpReq = false;
-									_canWallJump = false;
-								}
-								else if (Motor.GroundingStatus.FoundAnyGround)
-								{ //Perform a sloped jump
-									Vector3 jumpDirection = (Motor.GroundingStatus.GroundNormal + Vector3.up).normalized;
-									Motor.ForceUnground();
-									currentVelocity += (jumpDirection * JumpSpeed) - Vector3.Project(currentVelocity, Motor.CharacterUp);
-									_jumpReq = false;
-									_canWallJump = false;
-								}
-								else if (_canWallJump)
-								{ //Perform a wall jump
-									Vector3 jumpDirection = (Vector3.up + _wallNormal).normalized;
-									currentVelocity += (jumpDirection * WallJumpSpeed) - Vector3.Project(currentVelocity, Motor.CharacterUp);
-									_jumpReq = false;
-									_canWallJump = false;
-								}
-
-								if (!_jumpReq)
-									_jumpCooldownTimer = 0f;
-							}
-						}
-
-						if (_internalVelocityAdd.sqrMagnitude > 0f)
-						{
-							currentVelocity += _internalVelocityAdd;
-							_internalVelocityAdd = Vector3.zero;
-						}
-
-						break;
-					}
-				case PlayerState.Clamber:
-					{
-						break;
-					}
-				case PlayerState.OnWall:
-					{
-						Vector3 targetMovementVelocity = Vector3.zero;
-						if (currentVelocity.sqrMagnitude <= MinWallRunSpeed * MinWallRunSpeed)
-						{ //Square space
-						  //Don't have enough velocity, transition to falling
-							StateTransition(PlayerState.Default);
-							return;
-						}
-
-						Vector3 planeNorm = _wallNormal;
-						currentVelocity = currentVelocity - (Vector3.Dot(currentVelocity, planeNorm) * planeNorm);
-
-						EasingFunction.Function func = EasingFunction.GetEasingFunction(MoveSpeedEasing);
-						float wallMoveSpeed = Mathf.Lerp(WallRunMinMoveSpeed, WallRunMaxMoveSpeed, func(0f, 1f, _currentFluidity));
-						Vector3 inputRight = Vector3.Cross(_moveInputVector, Motor.CharacterUp);
-						Vector3 reorientedInput = Vector3.Cross(Vector3.up, inputRight).normalized * _moveInputVector.magnitude;
-						targetMovementVelocity = currentVelocity.normalized * reorientedInput.magnitude * wallMoveSpeed;
-						targetMovementVelocity = Quaternion.Euler(Head.transform.localRotation.eulerAngles.x, 0f, 0f) * targetMovementVelocity;
-
-						Debug.Log(targetMovementVelocity);
-						Debug.DrawLine(Head.transform.position, Head.transform.position + targetMovementVelocity * 10f, Color.red, 2f);
-
-						currentVelocity = Vector3.Lerp(currentVelocity, targetMovementVelocity, deltaTime);
-
-						if (_jumpReq && _jumpCooldownTimer >= JumpCooldown)
-						{
-							if (_jumpReqTimer >= JumpExpiryTime)
-								_jumpReq = false;
-							else
-							{
-								//Perform a wall jump
-                                StateTransition(PlayerState.Default);
-								Vector3 jumpDirection = (Vector3.up + _wallNormal).normalized;
-								currentVelocity += (jumpDirection * WallJumpSpeed) - Vector3.Project(currentVelocity, Motor.CharacterUp);
-								_jumpReq = false;
-								_canWallJump = false;
-
-								if (!_jumpReq)
-									_jumpCooldownTimer = 0f;
-							}
-						}
-						break;
-					}
-				case PlayerState.Slide:
-					{
-
-						break;
-					}
-			}
-		}
-
-		public override void AfterCharacterUpdate(float deltaTime)
-		{
-			//Updating jump req timer
-			_jumpReqTimer += deltaTime;
-			_jumpCooldownTimer += deltaTime;
-			_boostTimer += deltaTime;
-
-			//Wall run timer
-			_wallContactTimer += deltaTime;
-			if (_wallContactTimer >= MaxWallDisconnectTime && CurrentState == PlayerState.OnWall)
-			{
-				StateTransition(PlayerState.Default); //Fell off wall
-			}
-
-			//Updating wall jump timers
-			if (_canWallJump)
-			{
-				_canWallJumpTimer += deltaTime;
-				if (_canWallJumpTimer >= WallJumpExpiryTime)
-				{
-					_canWallJump = false;
-				}
-			}
-		}
-
-		public override void BeforeCharacterUpdate(float deltaTime)
-		{
-		}
-
-		public override void HandleMovementProjection(ref Vector3 movement, Vector3 obstructionNormal, bool stableOnHit)
-		{
-			base.HandleMovementProjection(ref movement, obstructionNormal, stableOnHit);
-		}
-
-		public override bool IsColliderValidForCollisions(Collider coll)
-		{
-			return true;
-		}
-
-		public override void OnGroundHit(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, ref HitStabilityReport hitStabilityReport)
-		{
-		}
-
-		public override void OnMovementHit(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, ref HitStabilityReport hitStabilityReport)
-		{
-			//Wall jumping
-			if (Vector3.Dot(hitNormal, Vector3.up) > 0f)
-			{
-				_canWallJump = true;
-				_canWallJumpTimer = 0f;
-				_wallNormal = hitNormal;
-			}
-
-			//Wall running
-			float wallCheck = Vector3.Dot(hitNormal, Vector3.up);
-			if (wallCheck >= 0f && wallCheck <= 0.4f)
-			{ //Hit valid wall
-				_wallContactTimer = 0f; //Reset timer
-				if (CurrentState != PlayerState.OnWall)
-				{ //Not currently wall running
-					if (!Motor.GroundingStatus.FoundAnyGround)
-					{
-						float wallDot = Vector3.Dot(hitNormal, Motor.CharacterForward);
-						if (wallDot < 0.2f && wallDot > -0.4f)
-						{
-							//We have run into a wall at an angle and weren't already wall running
-							StateTransition(PlayerState.OnWall);
-						}
-					}
-				}
-			}
-		}
-
-		public override void PostGroundingUpdate(float deltaTime)
-		{
-		}
-
-		public override void ProcessHitStabilityReport(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, Vector3 atCharacterPosition, Quaternion atCharacterRotation, ref HitStabilityReport hitStabilityReport)
-		{
-		}
-
-		public void UpdateFluidity(float deltaTime)
-		{
-			switch (CurrentState)
-			{
-				case PlayerState.Default:
-					{
-						//Only punish fluidity if on solid ground
-						if (Motor.GroundingStatus.IsStableOnGround)
-						{
-							//Speed up
-							_currentFluidity = Mathf.Clamp01(_currentFluidity + deltaTime * _fluiditySpeedUpFreq);
-
-							if (_moveInputVector.magnitude < 0.1f)
-							{ //Slow
-								_currentFluidity = Mathf.Clamp01(_currentFluidity - deltaTime * _fluiditySlowDownFreq);
-							}
-						}
-						else
-						{
-							if (_moveInputVector.magnitude > 0.1f)
-							{
-								_currentFluidity = Mathf.Clamp01(_currentFluidity + deltaTime * _fluiditySpeedUpFreq);
-							}
-						}
-						break;
-					}
-			}
-
-		}
-
-		public void OnGUI()
-		{
-			if (!DebugStats)
-				return;
-
-			GUILayout.Label(string.Format("Fluidity: {0}", _currentFluidity));
-			GUILayout.Label(string.Format("Current State: {0}", CurrentState.ToString()));
 		}
 	}
+
+	public override void HandleMovementProjection(ref Vector3 movement, Vector3 obstructionNormal, bool stableOnHit)
+	{
+
+        if (Mathf.Abs(Vector3.Dot(obstructionNormal, Vector3.up)) < 0.2f)
+        {
+            movement = Vector3.ProjectOnPlane(movement, obstructionNormal).normalized *
+                  movement.magnitude *
+                  (1f - Mathf.Clamp01(EasingFunction.EaseInOutSine(0f, 1f, Mathf.Abs(Vector3.Dot(transform.TransformDirection(_moveInput), obstructionNormal)) - 0.2f)));
+        }
+	}
+
+	public override bool IsColliderValidForCollisions(Collider coll)
+	{
+		return !IgnoredColliders.Contains(coll);
+	}
+
+	public override void OnGroundHit(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, ref HitStabilityReport hitStabilityReport)
+	{
+	}
+
+	public override void OnMovementHit(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, ref HitStabilityReport hitStabilityReport)
+	{
+    }
+
+	public override void PostGroundingUpdate(float deltaTime)
+	{
+        if (_lastGroundingReport.FoundAnyGround && !Motor.GroundingStatus.FoundAnyGround) {
+            //Left ground
+        }
+        if (!_lastGroundingReport.FoundAnyGround && Motor.GroundingStatus.FoundAnyGround) {
+            //Landed on ground
+
+            //Preserve current velocity
+            _internalVelocity = _lastVelocity;
+            Vector3 groundNorm = Motor.GroundingStatus.GroundNormal;
+            _internalVelocity = Vector3.ProjectOnPlane(_internalVelocity, groundNorm);
+            _internalVelocity *= (_lastVelocity - _internalVelocity).magnitude * LandingReduction * Mathf.Clamp01(Vector3.Dot(_lastVelocity, groundNorm) * -1f);
+        }
+
+        _lastGroundingReport = Motor.GroundingStatus;
+        _lastVelocity = Motor.Velocity;
+	}
+
+	public override void ProcessHitStabilityReport(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, Vector3 atCharacterPosition, Quaternion atCharacterRotation, ref HitStabilityReport hitStabilityReport)
+	{
+	}
+
+	public override void UpdateRotation(ref Quaternion currentRotation, float deltaTime)
+	{
+        switch (CurrentState) {
+            case PlayerState.Ground:
+                {
+                    NormalLook(ref currentRotation, deltaTime);
+                    break;
+                }
+            case PlayerState.Air:
+                {
+                    NormalLook(ref currentRotation, deltaTime);
+                    break;
+                }
+            case PlayerState.Wall:
+                {
+                    //Going to be slightly rotated to skew away from the wall
+                    break;
+                }
+            case PlayerState.Boost:
+                {
+                    NormalLook(ref currentRotation, deltaTime);
+                    break;
+                }
+        }
+	}
+
+	public override void UpdateVelocity(ref Vector3 currentVelocity, float deltaTime)
+	{
+        UpdatePlayerState();
+
+        //Drag internalVelocity
+        if (Vector3.Dot(transform.TransformDirection(_moveInput).normalized, _internalVelocity.normalized) <= 0f && _moveInput.sqrMagnitude > 0f)
+        {
+            //Input and Internal are facing away
+            _internalVelocity = Vector3.zero;
+        }
+        else
+        {
+            //Facing the same direction
+            _internalVelocity *= (1f / (1f + InternalDrag));
+        }
+        if (_internalVelocity.magnitude <= 0.3f)
+            _internalVelocity = Vector3.zero;
+
+        //Jumping happens any time
+        if (_jumpReq)
+        {
+            //Requested a jump
+            if (Motor.GroundingStatus.FoundAnyGround)
+            {
+                //Currently on ground
+                if (_jumpAvailable)
+                {
+                    //Perform a jump
+                    if (Motor.GroundingStatus.IsStableOnGround)
+                    {
+                        //Vertical jump
+                        currentVelocity += Vector3.up * Mathf.Sqrt(2f * JumpHeight * Gravity);
+                    }
+                    else
+                    {
+                        //Sloped jump
+                        currentVelocity += Motor.GroundingStatus.GroundNormal * Mathf.Sqrt(2f * JumpHeight * Gravity);
+                    }
+
+                    _jumpReq = false;
+                    _jumpCooldownTimer = 0f;
+                    TransitionToState(PlayerState.Air);
+                    Motor.ForceUnground();
+                }
+            }
+        }
+
+        //Update Running
+        if (_runActive && _currentMoveSpeed <= _targetMoveSpeed)
+        {
+            _currentMoveSpeed = Mathf.Lerp(_currentMoveSpeed, _targetMoveSpeed, deltaTime * RunStartup); //Startup slow to emphasize momentum
+        }
+        else if (_currentMoveSpeed > _targetMoveSpeed)
+        {
+            _currentMoveSpeed = Mathf.Lerp(_currentMoveSpeed, _targetMoveSpeed, deltaTime * RunSlowdown); //Slowdown quick to prevent too much sliding and run glitching
+        }
+
+		switch (CurrentState) {
+			case PlayerState.Ground:
+				{
+					GroundMove(ref currentVelocity, deltaTime);
+					break;               
+				}
+			case PlayerState.Air:
+				{
+					AirMove(ref currentVelocity, deltaTime);
+					break;
+				}
+			case PlayerState.Wall:
+				{
+
+					break;
+				}
+			case PlayerState.Boost:
+				{
+
+					break;
+				}
+		}
+	}
+
+    private void UpdatePlayerState() 
+    {
+        //Update player state
+        switch (CurrentState)
+        {
+            case PlayerState.Ground:
+                {
+                    if (!Motor.GroundingStatus.FoundAnyGround)
+                    {
+                        TransitionToState(PlayerState.Air);
+                    }
+                    break;
+                }
+            case PlayerState.Air:
+                {
+                    if (Motor.GroundingStatus.FoundAnyGround)
+                    {
+                        TransitionToState(PlayerState.Ground);
+                    }
+                    break;
+                }
+            case PlayerState.Wall:
+                {
+
+                    break;
+                }
+            case PlayerState.Boost:
+                {
+
+                    break;
+                }
+        }
+    }
+
+	private void GroundMove(ref Vector3 currentVelocity, float deltaTime)
+	{
+        //Update running
+        if (_runReq) {
+            if (Motor.GroundingStatus.IsStableOnGround) {
+                //start running
+                StartRunning();
+            }
+        }
+
+		Vector3 targetVelocity = Vector3.zero;
+
+		//Reorient velocity to surface normal
+        Vector3 effectiveGroundNormal = Motor.GroundingStatus.GroundNormal;
+        if (currentVelocity.sqrMagnitude > 0f && Motor.GroundingStatus.SnappingPrevented)
+        {
+            Vector3 groundPointToCharacter = Motor.TransientPosition - Motor.GroundingStatus.GroundPoint;
+            if (Vector3.Dot(currentVelocity, groundPointToCharacter) >= 0) {
+                effectiveGroundNormal = Motor.GroundingStatus.OuterGroundNormal;
+            } else {
+                effectiveGroundNormal = Motor.GroundingStatus.InnerGroundNormal;
+            }
+        }
+        currentVelocity = Motor.GetDirectionTangentToSurface(currentVelocity, effectiveGroundNormal) * currentVelocity.magnitude;
+
+        targetVelocity = transform.TransformDirection(_moveInput);
+        Vector3 inputRight = Vector3.Cross(targetVelocity, Motor.CharacterUp);
+        Vector3 reorientedInput = Vector3.Cross(effectiveGroundNormal, inputRight).normalized * _moveInput.magnitude;
+        targetVelocity = reorientedInput * _currentMoveSpeed;
+
+        currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, 1 - Mathf.Exp(-MoveSharpness * deltaTime));
+        currentVelocity = Vector3.ClampMagnitude(currentVelocity, GroundMoveMaxSpeed);
+
+        //Add in internal velocity
+        if (_internalVelocity.sqrMagnitude >= 0f)
+        {
+            currentVelocity += _internalVelocity * deltaTime;
+        }
+	}
+
+    private void AirMove(ref Vector3 currentVelocity, float deltaTime)
+    {
+        Vector3 targetVelocity = transform.TransformDirection(_moveInput) * _moveInput.magnitude;
+        //Only apply additional acceleration if below a certain threshold
+        if (new Vector3(currentVelocity.x, 0f, currentVelocity.z).magnitude < AirMoveMaxEffectiveSpeed) {
+            currentVelocity += targetVelocity * AirMoveSpeed * deltaTime;
+        } else if (Vector3.Dot(new Vector3(currentVelocity.x, 0f, currentVelocity.z), targetVelocity) < 0f && _moveInput.sqrMagnitude > 0f) {
+            currentVelocity += targetVelocity * AirMoveSpeed * deltaTime;
+        }
+        Vector3 velNoGrav = new Vector3(currentVelocity.x, 0f, currentVelocity.z);
+        velNoGrav = Vector3.ClampMagnitude(velNoGrav, AirMoveMaxSpeed);
+        velNoGrav.y = currentVelocity.y;
+        currentVelocity = velNoGrav;
+        currentVelocity += Vector3.down * Gravity * deltaTime;
+        if (Motor.GroundingStatus.FoundAnyGround)
+        {
+            Vector3 perpendicularObstructionNormal = Vector3.Cross(Vector3.Cross(Motor.CharacterUp, Motor.GroundingStatus.GroundNormal), Motor.CharacterUp).normalized;
+            currentVelocity = Vector3.ProjectOnPlane(currentVelocity, perpendicularObstructionNormal);
+        }
+        currentVelocity *= (1f / (1f + (AirDrag * deltaTime)));
+
+        if (_internalVelocity.sqrMagnitude >= 0f) {
+            currentVelocity += _internalVelocity * deltaTime;
+        }
+	}
+
+    private void StartRunning() 
+    {
+        _runReq = false;
+        _runActive = true;
+        _targetMoveSpeed = GroundRunSpeed;
+    }
+
+    private void StopRunning() 
+    {
+        _runActive = false;
+        _targetMoveSpeed = GroundMoveSpeed;
+
+        //Transfer run momentum into internal velocity
+        _internalVelocity += Motor.Velocity;
+    }
+
+    private void NormalLook(ref Quaternion currentRotation, float deltaTime)
+    {
+        float inputHorz = _lookInput.y;
+
+        //Left/Right aiming
+        Quaternion bodyRot = currentRotation;
+        Vector3 bodyRotEuler = bodyRot.eulerAngles;
+        bodyRotEuler.y += inputHorz * Mathf.Lerp(LookMinSensitivity, LookMaxSensitivity, Mathf.Abs(inputHorz));
+        Motor.RotateCharacter(Quaternion.Lerp(bodyRot, Quaternion.Euler(bodyRotEuler), deltaTime * LookSharpness));
+    }
+
+    private float ClampAngle(float angle, float min, float max)
+    {
+        if (angle < 0f) angle = 360 + angle;
+        if (angle > 180f) return Mathf.Max(angle, 360 + min);
+        return Mathf.Min(angle, max);
+    }
+
+    private List<Vector3> CheckSurroundings()
+    {
+        Debug.Log("Checking Surroundings");
+        //Sphere cast surrounding the player and return all hit normals
+        List<Vector3> hitNormals = new List<Vector3>();
+
+        RaycastHit[] hits = Physics.SphereCastAll(transform.position + Motor.CharacterUp * Motor.Capsule.height,
+                                                  Motor.Capsule.radius * 1.1f,
+                                                  -Motor.CharacterUp,
+                                                  Motor.Capsule.height
+                                                 );
+        if (hits.Length > 0) {
+            for (int i = 0; i < hits.Length; i++)
+            {
+                if (hits[i].collider.gameObject.layer.Equals(LayerMask.NameToLayer("Player"))) continue;
+                if (DebugLog) Debug.DrawLine(hits[i].point, hits[i].point + hits[i].normal * 0.1f, Color.blue, 5f);
+                if (hits[i].point != Vector3.zero) hitNormals.Add(hits[i].normal);
+            }
+        } else {
+            Debug.Log("Hit Nothing");
+        }
+
+        return hitNormals;
+    }
+
+    public void OnGUI()
+    {
+        if (!DebugLog) return;
+
+        GUILayout.Label(string.Format("Player State: {0}", CurrentState.ToString()));
+        GUILayout.Label(string.Format("Velocity: {0}, Internal Velocity: {1}", Motor.Velocity, _internalVelocity));
+        GUILayout.Label(string.Format("Current Move Speed: {0}, Target Move Speed: {1}", _currentMoveSpeed, _targetMoveSpeed));
+
+        Debug.DrawLine(transform.position, transform.position + Motor.Velocity, Color.red, 10f);
+        Debug.DrawLine(transform.position, transform.position + Motor.CharacterForward, Color.green, 10f);
+    }
+
+    //Only used for camera movement for smoothing purposes
+    public void LateUpdate()
+    {
+        float inputVert = _lookInput.x;
+        //Up/Down aiming
+        Quaternion headRot = Head.transform.localRotation;
+        Vector3 headRotEuler = headRot.eulerAngles;
+        headRotEuler.x = ClampAngle(headRotEuler.x + inputVert * Mathf.Lerp(LookMinSensitivity, LookMaxSensitivity, Mathf.Abs(inputVert)),
+                                    MinVerticalAngle,
+                                    MaxVerticalAngle
+                                   );
+        Head.transform.localRotation = Quaternion.Lerp(headRot, Quaternion.Euler(headRotEuler), Time.deltaTime * LookSharpness);
+        float percent = (_currentMoveSpeed - GroundMoveSpeed)/ (GroundRunSpeed - GroundMoveSpeed);
+        PlayerCamera.fieldOfView = BaseFOV + Mathf.Lerp(MinFOVAdd, MaxFOVAdd, EasingFunction.EaseInOutQuad(0f, 1f, percent));
+    }
 }

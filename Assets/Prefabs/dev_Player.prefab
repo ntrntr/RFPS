@@ -467,7 +467,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 68a4499f5dd18a84fba27fb469430ac0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  CharacterController: {fileID: 114042068847509642}
+  CharacterController: {fileID: 0}
   Capsule: {fileID: 136695589029829168}
   Rigidbody: {fileID: 54371674395609998}
   CapsuleRadius: 0.5
