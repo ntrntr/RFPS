@@ -9153,21 +9153,23 @@ MonoBehaviour:
   IgnoredColliders: []
   InputDelay: 0.1
   Head: {fileID: 1125731864}
-  GroundMoveAcceleration: 3
-  GroundMoveMaxSpeed: 5
-  AirMoveAcceleration: 3
-  AirMoveMaxSpeed: 10
+  GroundMoveSpeed: 5
+  GroundMoveMaxSpeed: 7
+  AirMoveSpeed: 4
+  AirMoveMaxSpeed: 5
   BoostCooldown: 2
   BoostSpeed: 10
-  MoveSharpness: 10
+  MoveSharpness: 15
   JumpCooldown: 0.3
   JumpHeight: 2
   Gravity: 20
   AirDrag: 0.1
   GroundDrag: 2
+  InternalDrag: 0.1
+  HitReduction: 1
   LookMinSensitivity: 5
-  LookMaxSensitivity: 20
-  LookSharpness: 10
+  LookMaxSensitivity: 10
+  LookSharpness: 20
   MinVerticalAngle: -85
   MaxVerticalAngle: 85
 --- !u!114 &1349391563

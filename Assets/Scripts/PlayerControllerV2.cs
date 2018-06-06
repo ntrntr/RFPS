@@ -31,9 +31,9 @@ public class PlayerControllerV2 : BaseCharacterController
     public GameObject Head;
 
     [Header("Movement Settings")]
-    public float GroundMoveAcceleration = 5f;
+    public float GroundMoveSpeed = 5f;
 	public float GroundMoveMaxSpeed = 10f;
-	public float AirMoveAcceleration = 5f;
+	public float AirMoveSpeed = 5f;
     public float AirMoveMaxSpeed = 25f;
 	public float BoostCooldown = 2f;
 	public float BoostSpeed = 10f;
@@ -43,6 +43,8 @@ public class PlayerControllerV2 : BaseCharacterController
     public float Gravity = 20f;
     public float AirDrag = 0.1f;
     public float GroundDrag = 2f;
+    public float InternalDrag = 2f;
+    public float HitReduction = 0.5f;
 
     [Header("Aim Settings")]
     public float LookMinSensitivity = 5f;
@@ -50,7 +52,6 @@ public class PlayerControllerV2 : BaseCharacterController
     public float LookSharpness = 10f;
     public float MinVerticalAngle = -85f;
     public float MaxVerticalAngle = 85f;
-
 
     //Input
 	private Vector3 _moveInput = Vector3.zero;
@@ -72,6 +73,8 @@ public class PlayerControllerV2 : BaseCharacterController
 
     //Other
     private CharacterGroundingReport _lastGroundingReport;
+    private Vector3 _lastVelocity;
+    private Vector3 _internalVelocity = Vector3.zero;
 
 	public void SetPlayerInputs (PlayerInputs inputs) {
         _moveInput = new Vector3(inputs.moveHorizontal, 0f, inputs.moveVertical);
@@ -161,13 +164,20 @@ public class PlayerControllerV2 : BaseCharacterController
 	public override void PostGroundingUpdate(float deltaTime)
 	{
         if (_lastGroundingReport.FoundAnyGround && !Motor.GroundingStatus.FoundAnyGround) {
-            Debug.Log("Left Ground");
+            //Left ground
         }
         if (!_lastGroundingReport.FoundAnyGround && Motor.GroundingStatus.FoundAnyGround) {
-            Debug.Log("Landed on Ground");
+            //Landed on ground
+
+            //Preserve current velocity
+            _internalVelocity = _lastVelocity;
+            Vector3 groundNorm = Motor.GroundingStatus.GroundNormal;
+            _internalVelocity = Vector3.ProjectOnPlane(_internalVelocity, groundNorm);
+            _internalVelocity *= (_lastVelocity - _internalVelocity).magnitude * HitReduction;
         }
 
         _lastGroundingReport = Motor.GroundingStatus;
+        _lastVelocity = Motor.Velocity;
 	}
 
 	public override void ProcessHitStabilityReport(Collider hitCollider, Vector3 hitNormal, Vector3 hitPoint, Vector3 atCharacterPosition, Quaternion atCharacterRotation, ref HitStabilityReport hitStabilityReport)
@@ -203,6 +213,20 @@ public class PlayerControllerV2 : BaseCharacterController
 	public override void UpdateVelocity(ref Vector3 currentVelocity, float deltaTime)
 	{
         UpdatePlayerState();
+
+        //Drag internalVelocity
+        if (Vector3.Dot(transform.TransformDirection(_moveInput).normalized, _internalVelocity.normalized) <= 0f && _moveInput.sqrMagnitude > 0f)
+        {
+            //Input and Internal are facing away
+            _internalVelocity = Vector3.zero;
+        }
+        else
+        {
+            //Facing the same direction
+            _internalVelocity *= (1f / (1f + InternalDrag));
+        }
+        if (_internalVelocity.magnitude <= 0.3f)
+            _internalVelocity = Vector3.zero;
 
         //Jumping happens any time
         if (_jumpReq)
@@ -297,26 +321,50 @@ public class PlayerControllerV2 : BaseCharacterController
 
 		//Reorient velocity to surface normal
 		Vector3 norm = Motor.GroundingStatus.GroundNormal;
+        if (currentVelocity.sqrMagnitude > 0f && Motor.GroundingStatus.SnappingPrevented)
+        {
+            Vector3 groundPointToCharacter = Motor.TransientPosition - Motor.GroundingStatus.GroundPoint;
+            if (Vector3.Dot(currentVelocity, groundPointToCharacter) >= 0) {
+                norm = Motor.GroundingStatus.OuterGroundNormal;
+            } else {
+                norm = Motor.GroundingStatus.InnerGroundNormal;
+            }
+        }
         currentVelocity = Motor.GetDirectionTangentToSurface(currentVelocity, norm) * currentVelocity.magnitude;
-		targetVelocity = _moveInput * GroundMoveAcceleration;
 
-        //Rotate targetVelocity to be relative to character's orientation
+		targetVelocity = _moveInput * GroundMoveSpeed;
         targetVelocity = transform.TransformDirection(targetVelocity);
-        targetVelocity += currentVelocity;
-        targetVelocity = targetVelocity.normalized * Mathf.Clamp(targetVelocity.magnitude, 0f, GroundMoveMaxSpeed);
         currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, 1 - Mathf.Exp(-MoveSharpness * deltaTime));
-        currentVelocity *= (1f / (1f + (GroundDrag * deltaTime)));
+        currentVelocity = Vector3.ClampMagnitude(currentVelocity, GroundMoveMaxSpeed);
+
+        //Add in internal velocity
+        if (_internalVelocity.sqrMagnitude >= 0f)
+        {
+            currentVelocity += _internalVelocity * deltaTime;
+        }
 	}
 
 	private void AirMove(ref Vector3 currentVelocity, float deltaTime) 
 	{
-        Vector3 targetVelocity = _moveInput * AirMoveAcceleration;
+        Vector3 targetVelocity = _moveInput * AirMoveSpeed;
         targetVelocity = transform.TransformDirection(targetVelocity);
-        targetVelocity += currentVelocity;
-        targetVelocity = targetVelocity.normalized * Mathf.Clamp(targetVelocity.magnitude, 0f, AirMoveMaxSpeed);
-        currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, 1 - Mathf.Exp(-MoveSharpness * deltaTime));
+
+        currentVelocity += targetVelocity * AirMoveSpeed * deltaTime;
+        Vector3 velNoGrav = new Vector3(currentVelocity.x, 0f, currentVelocity.z);
+        velNoGrav = Vector3.ClampMagnitude(velNoGrav, AirMoveMaxSpeed);
+        velNoGrav.y += currentVelocity.y;
+        currentVelocity = velNoGrav;
         currentVelocity += Vector3.down * Gravity * deltaTime;
+        if (Motor.GroundingStatus.FoundAnyGround)
+        {
+            Vector3 perpendicularObstructionNormal = Vector3.Cross(Vector3.Cross(Motor.CharacterUp, Motor.GroundingStatus.GroundNormal), Motor.CharacterUp).normalized;
+            currentVelocity = Vector3.ProjectOnPlane(currentVelocity, perpendicularObstructionNormal);
+        }
         currentVelocity *= (1f / (1f + (AirDrag * deltaTime)));
+
+        if (_internalVelocity.sqrMagnitude >= 0f) {
+            currentVelocity += _internalVelocity * deltaTime;
+        }
 	}
 
     private void NormalLook(ref Quaternion currentRotation, float deltaTime)
@@ -324,7 +372,7 @@ public class PlayerControllerV2 : BaseCharacterController
         float inputHorz = _lookInput.y;
 
         //Left/Right aiming
-        Quaternion bodyRot = transform.localRotation;
+        Quaternion bodyRot = currentRotation;
         Vector3 bodyRotEuler = bodyRot.eulerAngles;
         bodyRotEuler.y += inputHorz * Mathf.Lerp(LookMinSensitivity, LookMaxSensitivity, Mathf.Abs(inputHorz));
         Motor.RotateCharacter(Quaternion.Lerp(bodyRot, Quaternion.Euler(bodyRotEuler), deltaTime * LookSharpness));
@@ -342,6 +390,7 @@ public class PlayerControllerV2 : BaseCharacterController
         if (!DebugLog) return;
 
         GUILayout.Label(string.Format("Player State: {0}", CurrentState.ToString()));
+        GUILayout.Label(string.Format("Internal Velocity : {0}", _internalVelocity));
         Debug.DrawLine(transform.position, transform.position + Motor.Velocity, Color.red, 10f);
         Debug.DrawLine(transform.position, transform.position + Motor.CharacterForward, Color.green, 10f);
     }
