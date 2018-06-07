@@ -201,7 +201,7 @@ public class PlayerController : BaseCharacterController
         {
             movement = Vector3.ProjectOnPlane(movement, obstructionNormal).normalized *
                   movement.magnitude *
-                  (1f - Mathf.Clamp01(EasingFunction.EaseInOutSine(0f, 1f, Mathf.Abs(Vector3.Dot(transform.TransformDirection(_moveInput), obstructionNormal)) - 0.2f)));
+                  (1f - Mathf.Clamp01(EasingFunction.EaseInOutSine(0f, 1f, Mathf.Abs(Vector3.Dot(transform.TransformDirection(_moveInput), obstructionNormal)))));
         }
 	}
 
@@ -227,9 +227,11 @@ public class PlayerController : BaseCharacterController
             //Landed on ground
 
             //Preserve current velocity
+            //TODO Maybe do some actual ground normal calculations for the internal velocity calculations
+            Debug.Log("PostGroundingUpdate");
             _internalVelocity = _lastVelocity;
             Vector3 groundNorm = Motor.GroundingStatus.GroundNormal;
-            _internalVelocity = Vector3.ProjectOnPlane(_internalVelocity, groundNorm);
+            _internalVelocity = Vector3.ProjectOnPlane(_internalVelocity, groundNorm).normalized;
             _internalVelocity *= (_lastVelocity - _internalVelocity).magnitude * LandingReduction * Mathf.Clamp01(Vector3.Dot(_lastVelocity, groundNorm) * -1f);
         }
 
@@ -274,17 +276,16 @@ public class PlayerController : BaseCharacterController
         //Drag internalVelocity
         if (Vector3.Dot(transform.TransformDirection(_moveInput).normalized, _internalVelocity.normalized) <= 0f && _moveInput.sqrMagnitude > 0f)
         {
-            //Input and Internal are facing away
-            _internalVelocity = Vector3.zero;
+            _internalVelocity *= 0.5f;
         }
         else
         {
             //Facing the same direction
-            _internalVelocity *= (1f / (1f + InternalDrag));
+            _internalVelocity *= 1f/ (1f + InternalDrag * deltaTime);
         }
         if (_internalVelocity.magnitude <= 0.3f)
             _internalVelocity = Vector3.zero;
-
+            
         //Jumping happens any time
         if (_jumpReq)
         {
@@ -303,7 +304,7 @@ public class PlayerController : BaseCharacterController
                     else
                     {
                         //Sloped jump
-                        currentVelocity += Motor.GroundingStatus.GroundNormal * Mathf.Sqrt(2f * JumpHeight * Gravity);
+                        currentVelocity += Motor.GroundingStatus.GroundNormal.normalized * Mathf.Sqrt(2f * JumpHeight * Gravity);
                     }
 
                     _jumpReq = false;
@@ -418,7 +419,7 @@ public class PlayerController : BaseCharacterController
         //Add in internal velocity
         if (_internalVelocity.sqrMagnitude >= 0f)
         {
-            currentVelocity += _internalVelocity * deltaTime;
+            currentVelocity += _internalVelocity;
         }
 	}
 
@@ -431,21 +432,23 @@ public class PlayerController : BaseCharacterController
         } else if (Vector3.Dot(new Vector3(currentVelocity.x, 0f, currentVelocity.z), targetVelocity) < 0f && _moveInput.sqrMagnitude > 0f) {
             currentVelocity += targetVelocity * AirMoveSpeed * deltaTime;
         }
+
+        if (_internalVelocity.sqrMagnitude >= 0f)
+        {
+            currentVelocity += _internalVelocity;
+        }
+
         Vector3 velNoGrav = new Vector3(currentVelocity.x, 0f, currentVelocity.z);
         velNoGrav = Vector3.ClampMagnitude(velNoGrav, AirMoveMaxSpeed);
         velNoGrav.y = currentVelocity.y;
         currentVelocity = velNoGrav;
         currentVelocity += Vector3.down * Gravity * deltaTime;
-        if (Motor.GroundingStatus.FoundAnyGround)
+        /*if (Motor.GroundingStatus.FoundAnyGround)
         {
             Vector3 perpendicularObstructionNormal = Vector3.Cross(Vector3.Cross(Motor.CharacterUp, Motor.GroundingStatus.GroundNormal), Motor.CharacterUp).normalized;
             currentVelocity = Vector3.ProjectOnPlane(currentVelocity, perpendicularObstructionNormal);
-        }
+        }*/
         currentVelocity *= (1f / (1f + (AirDrag * deltaTime)));
-
-        if (_internalVelocity.sqrMagnitude >= 0f) {
-            currentVelocity += _internalVelocity * deltaTime;
-        }
 	}
 
     private void StartRunning() 
@@ -461,7 +464,9 @@ public class PlayerController : BaseCharacterController
         _targetMoveSpeed = GroundMoveSpeed;
 
         //Transfer run momentum into internal velocity
-        _internalVelocity += Motor.Velocity;
+        if (Motor.GroundingStatus.FoundAnyGround)
+            _internalVelocity += _lastVelocity * LandingReduction;
+        
     }
 
     private void NormalLook(ref Quaternion currentRotation, float deltaTime)
@@ -514,6 +519,7 @@ public class PlayerController : BaseCharacterController
         GUILayout.Label(string.Format("Player State: {0}", CurrentState.ToString()));
         GUILayout.Label(string.Format("Velocity: {0}, Internal Velocity: {1}", Motor.Velocity, _internalVelocity));
         GUILayout.Label(string.Format("Current Move Speed: {0}, Target Move Speed: {1}", _currentMoveSpeed, _targetMoveSpeed));
+        GUILayout.Label(string.Format("Running: {0}", _runActive));
 
         Debug.DrawLine(transform.position, transform.position + Motor.Velocity, Color.red, 10f);
         Debug.DrawLine(transform.position, transform.position + Motor.CharacterForward, Color.green, 10f);
